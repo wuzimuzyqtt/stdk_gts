@@ -123,7 +123,10 @@ namespace GTS
 					Vector3 spot = GtsGround.Find(player.position + fwd.normalized * 2f * Mathf.Max(scale, 0.25f), out _);
 					GtsGore.Play(spot, scale);
 					GtsGore.Splat(spot);
-					GtsCorpse.Spawn(player, spot, scale);
+					if (GtsConfig.FlatCorpse)
+					{
+						GtsCorpse.Spawn(player, spot, scale);
+					}
 					Out("gts: gore preview played");
 					break;
 				}

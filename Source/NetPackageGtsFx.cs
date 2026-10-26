@@ -62,7 +62,10 @@ namespace GTS
 			GtsGore.Splat(ground);
 			// must run before GtsDriver hides the squashed body (next LateUpdate), while its pose is still there
 			World world = GameManager.Instance.World;
-			GtsCorpse.Spawn(world != null ? world.GetEntity(_entityId) as EntityAlive : null, ground, _scale);
+			if (GtsConfig.FlatCorpse)
+			{
+				GtsCorpse.Spawn(world != null ? world.GetEntity(_entityId) as EntityAlive : null, ground, _scale);
+			}
 		}
 	}
 }

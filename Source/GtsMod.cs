@@ -39,6 +39,8 @@ namespace GTS
 		public const float StompMinDY = -0.4f;     // stomper feet relative to victim feet
 		public const float StompHeadroom = 0.3f;   // stomper feet may be this far above the victim's head (standing on them)
 		public const float StompMinSpeed = 0.5f;   // m/s, standing still next to a tiny player is safe
+		public const float PlayerStompMaxScale = 0.3f; // other players only squash someone shrunk below this
+		public const float MaleTouchMargin = 0.2f;  // male zombie falls apart within its own radius + victim radius + this
 
 		// Female zombie stomp: she starts lifting her foot within StompTriggerRange; when it comes down
 		// (StompRaiseTime + StompHoldTime + StompSlamTime later) the server checks whether the victim is still
@@ -71,6 +73,7 @@ namespace GTS
 		// Squash FX (client side, see GtsGore)
 		public static readonly string[] SquashSounds = { "gib", "gore_head" };
 		public const float GoreParticleScale = 2.5f;   // size multiplier for the blood particle effects
+		public static readonly bool FlatCorpse = false; // leave the flattened body in the blood pool
 		public const float FlatCorpseThickness = 0.06f; // flattened corpse depth relative to the body
 		public const float FlatCorpseLift = 0.02f;      // metres above the ground, to sit on top of the blood
 		public const float GoreEatBloodScale = 1.5f;   // extra size for the blood_eat spurts on top of GoreParticleScale

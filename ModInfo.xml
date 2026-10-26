@@ -2,7 +2,7 @@
 <xml>
 	<Name value="GTS" />
 	<DisplayName value="GTS (Shrink &amp; Squash)" />
-	<Version value="0.10.1" />
+	<Version value="0.11.0" />
 	<Description value="Players can shrink themselves; anyone walking over a tiny player squashes them into a pile of blood. Install on server and all clients. Requires EAC off." />
 	<Author value="zhang" />
 	<SkipWithAntiCheat value="true" />

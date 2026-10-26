@@ -198,7 +198,9 @@ namespace GTS
 					{
 						if (!GtsZombies.IsFemale(zombie))
 						{
-							if (distSq <= radius * radius)
+							// "touching": the zombie body blocks the tiny player at about its own radius
+							float touch = Mathf.Max(zombie.radius, 0.3f) + GtsConfig.PlayerRadius * scale + GtsConfig.MaleTouchMargin;
+							if (distSq <= touch * touch)
 							{
 								// any contact is enough, moving or not; the victim survives
 								Log.Out("[GTS] {0} touched {1} and fell apart", zombie.GetDebugName(), victim.GetDebugName());
@@ -211,7 +213,7 @@ namespace GTS
 						}
 						continue;
 					}
-					if (distSq > radius * radius)
+					if (distSq > radius * radius || scale >= GtsConfig.PlayerStompMaxScale)
 					{
 						continue;
 					}
