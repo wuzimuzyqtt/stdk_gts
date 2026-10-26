@@ -7,13 +7,15 @@ namespace GTS
 	{
 		private int entityId;
 		private Vector3 pos;
+		private float scale;   // victim shrink scale; the gore is sized to match
 
 		public override NetPackageDirection PackageDirection => NetPackageDirection.ToClient;
 
-		public NetPackageGtsFx Setup(int _entityId, Vector3 _pos)
+		public NetPackageGtsFx Setup(int _entityId, Vector3 _pos, float _scale)
 		{
 			entityId = _entityId;
 			pos = _pos;
+			scale = _scale;
 			return this;
 		}
 
@@ -21,6 +23,7 @@ namespace GTS
 		{
 			entityId = _br.ReadInt32();
 			pos = new Vector3(_br.ReadSingle(), _br.ReadSingle(), _br.ReadSingle());
+			scale = _br.ReadSingle();
 		}
 
 		public override void write(PooledBinaryWriter _bw)
@@ -30,39 +33,36 @@ namespace GTS
 			_bw.Write(pos.x);
 			_bw.Write(pos.y);
 			_bw.Write(pos.z);
+			_bw.Write(scale);
 		}
 
 		public override void ProcessPackage(World _world, GameManager _callbacks)
 		{
 			if (_world != null)
 			{
-				PlayLocal(entityId, pos);
+				PlayLocal(entityId, pos, scale);
 			}
 		}
 
 		public override int GetLength()
 		{
-			return 16;
+			return 20;
 		}
 
-		public static void PlayLocal(int _entityId, Vector3 _pos)
+		public static void PlayLocal(int _entityId, Vector3 _pos, float _scale)
 		{
-			GtsDriver.Squashed.Add(_entityId);
+			GtsDriver.Squashed[_entityId] = Time.time;
 			if (GameManager.IsDedicatedServer)
 			{
 				return;
 			}
-			for (int i = 0; i < GtsConfig.BloodBursts; i++)
-			{
-				Vector2 r = Random.insideUnitCircle * 0.6f;
-				Vector3 p = _pos + new Vector3(r.x, Random.Range(0.05f, 0.5f), r.y);
-				Quaternion rot = Quaternion.Euler(Random.Range(-90f, 0f), Random.Range(0f, 360f), 0f);
-				ParticleEffect.SpawnParticleEffect(new ParticleEffect(GtsConfig.BloodParticle, p, rot, 1f, Color.white), -1, true);
-			}
-			for (int i = 0; i < GtsConfig.SquashSounds.Length; i++)
-			{
-				Audio.Manager.Play(_pos, GtsConfig.SquashSounds[i]);
-			}
+			// everything is laid on the actual ground under the victim, not their (possibly sunk-in) position
+			Vector3 ground = GtsGround.Find(_pos, out _);
+			GtsGore.Play(ground, _scale);
+			GtsGore.Splat(ground);
+			// must run before GtsDriver hides the squashed body (next LateUpdate), while its pose is still there
+			World world = GameManager.Instance.World;
+			GtsCorpse.Spawn(world != null ? world.GetEntity(_entityId) as EntityAlive : null, ground, _scale);
 		}
 	}
 }

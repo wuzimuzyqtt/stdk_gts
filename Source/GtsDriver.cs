@@ -8,6 +8,9 @@ namespace GTS
 	//  - Server: detects stomps, kills the victim, spills blood blocks and cleans them up later.
 	public class GtsDriver : MonoBehaviour
 	{
+		// For coroutines started from static code (Harmony patches).
+		public static GtsDriver Instance { get; private set; }
+
 		private struct BloodBlock
 		{
 			public Vector3i pos;
@@ -15,8 +18,11 @@ namespace GTS
 			public float removeAt;
 		}
 
-		// Players whose body should stay hidden until they respawn (client side).
-		public static readonly HashSet<int> Squashed = new HashSet<int>();
+		// Players squashed recently -> time of the squash. While they are dead their body stays hidden, the death
+		// camera is ours and zombies leave the corpse alone. Kept until a little after they are alive again, since
+		// on a client the squash message can arrive a moment before the death itself.
+		public static readonly Dictionary<int, float> Squashed = new Dictionary<int, float>();
+		private const float SquashForgetDelay = 2f;
 
 		// Model scale we last applied per entity, so we only touch models we changed ourselves.
 		private readonly Dictionary<int, float> appliedScale = new Dictionary<int, float>();
@@ -24,7 +30,22 @@ namespace GTS
 		private readonly Dictionary<int, Vector3> lastPos = new Dictionary<int, Vector3>();
 		private readonly List<BloodBlock> bloodBlocks = new List<BloodBlock>();
 		private readonly List<EntityAlive> stompers = new List<EntityAlive>();
+
+		private class PendingStomp
+		{
+			public EntityZombie zombie;
+			public EntityPlayer victim;
+			public float impactAt;
+		}
+		private readonly Dictionary<int, PendingStomp> pendingStomps = new Dictionary<int, PendingStomp>();
+		private readonly Dictionary<int, float> stompCooldownUntil = new Dictionary<int, float>();
+		private readonly List<int> doneStomps = new List<int>();
 		private float lastCheck;
+
+		private void Awake()
+		{
+			Instance = this;
+		}
 
 		private static World GetWorld()
 		{
@@ -44,15 +65,14 @@ namespace GTS
 				lastCheck = Time.time;
 				CheckStomps(world, dt);
 			}
+			ResolveStomps(world);
 			CleanupBlood(world);
 		}
 
+		// Runs on the dedicated server too: zombies are moved there, so a tiny player's colliders must be small
+		// on the server as well, or zombies bump into a full-size invisible pillar instead of walking over them.
 		private void LateUpdate()
 		{
-			if (GameManager.IsDedicatedServer)
-			{
-				return;
-			}
 			World world = GetWorld();
 			if (world == null)
 			{
@@ -69,8 +89,19 @@ namespace GTS
 				{
 					continue;
 				}
-				ApplyVisualScale(p);
-				GtsColliders.Apply(p, GtsConfig.IsShrunk(p) ? GtsConfig.GetScale(p) : 1f);
+				if (Squashed.TryGetValue(p.entityId, out float squashedAt) && !p.IsDead() && Time.time - squashedAt > SquashForgetDelay)
+				{
+					Squashed.Remove(p.entityId);
+				}
+				if (!GameManager.IsDedicatedServer)
+				{
+					ApplyVisualScale(p);
+				}
+				GtsColliders.Apply(p, GtsConfig.HasShrinkBuff(p) ? GtsConfig.GetScale(p) : 1f);
+			}
+			if (!GameManager.IsDedicatedServer)
+			{
+				GtsStompAnim.LateUpdate();
 			}
 		}
 
@@ -82,18 +113,11 @@ namespace GTS
 			}
 			int id = _player.entityId;
 			float target = 1f;
-			if (Squashed.Contains(id))
+			if (Squashed.ContainsKey(id) && _player.IsDead())
 			{
-				if (_player.IsDead())
-				{
-					target = 0.001f;
-				}
-				else
-				{
-					Squashed.Remove(id);
-				}
+				target = 0.001f;
 			}
-			if (target == 1f && GtsConfig.IsShrunk(_player))
+			if (target == 1f && GtsConfig.HasShrinkBuff(_player))
 			{
 				target = GtsConfig.GetScale(_player);
 			}
@@ -128,14 +152,20 @@ namespace GTS
 			{
 				stompers.Add(players[i]);
 			}
-			if (GtsConfig.ZombiesCanStomp)
+			// zombies matter whenever someone is tiny: female ones may squash them, male ones fall apart on contact
+			bool anyShrunk = false;
+			for (int i = 0; i < players.Count && !anyShrunk; i++)
+			{
+				anyShrunk = GtsConfig.IsShrunk(players[i]);
+			}
+			if (anyShrunk)
 			{
 				List<Entity> entities = _world.Entities.list;
 				for (int i = 0; i < entities.Count; i++)
 				{
-					if (entities[i] is EntityEnemy enemy)
+					if (entities[i] is EntityZombie zombie)
 					{
-						stompers.Add(enemy);
+						stompers.Add(zombie);
 					}
 				}
 			}
@@ -147,6 +177,10 @@ namespace GTS
 				{
 					continue;
 				}
+				float scale = GtsConfig.GetScale(victim);
+				float radius = GtsConfig.StompFootRadius + GtsConfig.PlayerRadius * scale;
+				float maxDY = GtsConfig.PlayerHeight * scale + GtsConfig.StompHeadroom;
+				bool femaleZombiesStomp = GtsConfig.ZombiesCanStomp(victim);
 				for (int s = 0; s < stompers.Count; s++)
 				{
 					EntityAlive stomper = stompers[s];
@@ -155,11 +189,29 @@ namespace GTS
 						continue;
 					}
 					Vector3 d = stomper.position - victim.position;
-					if (d.y < GtsConfig.StompMinDY || d.y > GtsConfig.StompMaxDY)
+					float distSq = d.x * d.x + d.z * d.z;
+					if (d.y < GtsConfig.StompMinDY || d.y > maxDY)
 					{
 						continue;
 					}
-					if (d.x * d.x + d.z * d.z > GtsConfig.StompRadius * GtsConfig.StompRadius)
+					if (stomper is EntityZombie zombie)
+					{
+						if (!GtsZombies.IsFemale(zombie))
+						{
+							if (distSq <= radius * radius)
+							{
+								// any contact is enough, moving or not; the victim survives
+								Log.Out("[GTS] {0} touched {1} and fell apart", zombie.GetDebugName(), victim.GetDebugName());
+								GtsZombies.Dismember(zombie, victim.position);
+							}
+						}
+						else if (femaleZombiesStomp && distSq <= GtsConfig.StompTriggerRange * GtsConfig.StompTriggerRange)
+						{
+							BeginStomp(zombie, victim);
+						}
+						continue;
+					}
+					if (distSq > radius * radius)
 					{
 						continue;
 					}
@@ -180,6 +232,86 @@ namespace GTS
 			}
 		}
 
+		private void BeginStomp(EntityZombie _zombie, EntityPlayer _victim)
+		{
+			int id = _zombie.entityId;
+			if (pendingStomps.ContainsKey(id) || (stompCooldownUntil.TryGetValue(id, out float until) && Time.time < until))
+			{
+				return;
+			}
+			float impact = GtsConfig.StompRaiseTime + GtsConfig.StompHoldTime + GtsConfig.StompSlamTime;
+			PendingStomp ps = new PendingStomp { zombie = _zombie, victim = _victim, impactAt = Time.time + impact };
+			pendingStomps[id] = ps;
+			FaceVictim(ps);
+			stompCooldownUntil[id] = Time.time + impact + GtsConfig.StompCooldown;
+
+			SingletonMonoBehaviour<ConnectionManager>.Instance.SendPackage(NetPackageManager.GetPackage<NetPackageGtsStomp>().Setup(id));
+			if (!GameManager.IsDedicatedServer)
+			{
+				GtsStompAnim.Play(_zombie);
+			}
+		}
+
+		// The foot comes down: squash whoever tiny is still under it.
+		private void ResolveStomps(World _world)
+		{
+			if (pendingStomps.Count == 0)
+			{
+				return;
+			}
+			foreach (KeyValuePair<int, PendingStomp> kv in pendingStomps)
+			{
+				PendingStomp ps = kv.Value;
+				if (Time.time < ps.impactAt)
+				{
+					FaceVictim(ps);
+					continue;
+				}
+				doneStomps.Add(kv.Key);
+				EntityZombie z = ps.zombie;
+				EntityPlayer v = ps.victim;
+				if (z == null || z.IsDead() || v == null || !GtsConfig.IsShrunk(v) || !GtsConfig.ZombiesCanStomp(v))
+				{
+					continue;
+				}
+				Vector3 fwd = z.GetForwardVector();
+				fwd.y = 0f;
+				Vector3 foot = z.position + (fwd.sqrMagnitude > 0.001f ? fwd.normalized : Vector3.zero) * GtsConfig.StompFootReach;
+				float scale = GtsConfig.GetScale(v);
+				float hitRadius = GtsConfig.StompFootRadius + GtsConfig.PlayerRadius * scale + GtsConfig.StompHitLeniency;
+				Vector3 d = v.position - foot;
+				if (Mathf.Abs(d.y) <= GtsConfig.PlayerHeight * scale + GtsConfig.StompHeadroom && d.x * d.x + d.z * d.z <= hitRadius * hitRadius)
+				{
+					Squash(_world, v, z);
+				}
+			}
+			foreach (int id in doneStomps)
+			{
+				pendingStomps.Remove(id);
+			}
+			doneStomps.Clear();
+		}
+
+		// While winding up, the zombie stops and turns to the victim so the foot comes down on them.
+		// Rotation is replicated to every client by the game.
+		private static void FaceVictim(PendingStomp _ps)
+		{
+			if (_ps.zombie == null || _ps.zombie.IsDead() || _ps.victim == null)
+			{
+				return;
+			}
+			Vector3 d = _ps.victim.position - _ps.zombie.position;
+			if (d.x * d.x + d.z * d.z > 0.0001f)
+			{
+				float yaw = 90f - Mathf.Atan2(d.z, d.x) * Mathf.Rad2Deg;
+				_ps.zombie.SetRotationAndStopTurning(new Vector3(0f, yaw, 0f));
+			}
+			if (_ps.zombie.moveHelper != null)
+			{
+				_ps.zombie.moveHelper.Stop();
+			}
+		}
+
 		private float GetSpeed(EntityAlive _e, float _dt)
 		{
 			if (!lastPos.TryGetValue(_e.entityId, out Vector3 prev) || _dt <= 0f)
@@ -197,46 +329,38 @@ namespace GTS
 			Log.Out("[GTS] {0} squashed {1}", _stomper.GetDebugName(), _victim.GetDebugName());
 
 			// FX first so clients hide the body before the death animation starts
-			NetPackageGtsFx pkg = NetPackageManager.GetPackage<NetPackageGtsFx>().Setup(_victim.entityId, pos);
+			float scale = GtsConfig.GetScale(_victim);
+			NetPackageGtsFx pkg = NetPackageManager.GetPackage<NetPackageGtsFx>().Setup(_victim.entityId, pos, scale);
 			SingletonMonoBehaviour<ConnectionManager>.Instance.SendPackage(pkg);
 			if (!GameManager.IsDedicatedServer)
 			{
-				NetPackageGtsFx.PlayLocal(_victim.entityId, pos);
+				NetPackageGtsFx.PlayLocal(_victim.entityId, pos, scale);
 			}
 
 			// no attacker entity on the damage source, so the server's PvP setting can't block it
 			DamageSource src = new DamageSource(EnumDamageSource.External, EnumDamageTypes.Crushing, Vector3.down);
 			_victim.DamageEntity(src, 99999, false, 1f);
 
-			SpillBlood(_world, pos);
+			if (GtsConfig.UseBloodBlocks)
+			{
+				SpillBlood(_world, pos);
+			}
 		}
 
 		private void SpillBlood(World _world, Vector3 _pos)
 		{
 			Vector3i center = World.worldToBlockPos(_pos);
 			List<BlockChangeInfo> changes = new List<BlockChangeInfo>();
-			Vector3i[] offsets =
+			// a single pool right where the victim was
+			if (FindFloor(_world, center, out Vector3i p))
 			{
-				Vector3i.zero, new Vector3i(1, 0, 0), new Vector3i(-1, 0, 0), new Vector3i(0, 0, 1), new Vector3i(0, 0, -1)
-			};
-			for (int i = 0; i < offsets.Length; i++)
-			{
-				if (i > 0 && Random.value < 0.4f)
-				{
-					continue;
-				}
-				if (!FindFloor(_world, center + offsets[i], out Vector3i p))
-				{
-					continue;
-				}
 				BlockValue bv = Block.GetBlockValue(GtsConfig.BloodBlocks[Random.Range(0, GtsConfig.BloodBlocks.Length)]);
-				if (bv.isair)
+				if (!bv.isair)
 				{
-					continue;
+					bv.rotation = (byte)Random.Range(0, 4);
+					changes.Add(new BlockChangeInfo(p, bv, true));
+					bloodBlocks.Add(new BloodBlock { pos = p, type = bv.type, removeAt = Time.time + GtsConfig.BloodLifetime });
 				}
-				bv.rotation = (byte)Random.Range(0, 4);
-				changes.Add(new BlockChangeInfo(p, bv, true));
-				bloodBlocks.Add(new BloodBlock { pos = p, type = bv.type, removeAt = Time.time + GtsConfig.BloodLifetime });
 			}
 			if (changes.Count > 0)
 			{

@@ -1,7 +1,7 @@
 <configs>
 	<append xpath="/buffs">
-		<!-- Shrunk state. The scale itself lives in the cvar "gtsShrinkScale"; GTS.dll applies it on every machine. -->
-		<buff name="buffGtsShrink" name_key="buffGtsShrinkName" description_key="buffGtsShrinkDesc" icon="ui_game_symbol_twitch_small_zombies" icon_color="200,30,30" remove_on_death="true">
+		<!-- Shrunk state, kept through death until "gts grow". The scale itself lives in the cvar "gtsShrinkScale"; GTS.dll applies it on every machine. -->
+		<buff name="buffGtsShrink" name_key="buffGtsShrinkName" description_key="buffGtsShrinkDesc" icon="ui_game_symbol_twitch_small_zombies" icon_color="200,30,30" remove_on_death="false">
 			<stack_type value="ignore"/>
 		</buff>
 	</append>

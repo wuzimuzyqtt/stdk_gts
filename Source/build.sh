@@ -9,7 +9,7 @@ CSC="/c/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/MSBuild/Curr
   -out:../GTS.dll \
   -r:"$M/mscorlib.dll" -r:"$M/System.dll" -r:"$M/System.Core.dll" -r:"$M/netstandard.dll" \
   -r:"$M/Assembly-CSharp.dll" -r:"$M/Assembly-CSharp-firstpass.dll" -r:"$M/LogLibrary.dll" \
-  -r:"$M/UnityEngine.dll" -r:"$M/UnityEngine.CoreModule.dll" -r:"$M/UnityEngine.PhysicsModule.dll" \
+  -r:"$M/UnityEngine.dll" -r:"$M/UnityEngine.CoreModule.dll" -r:"$M/UnityEngine.PhysicsModule.dll" -r:"$M/UnityEngine.ParticleSystemModule.dll" -r:"$M/UnityEngine.AnimationModule.dll" -r:"$M/Unity.Addressables.dll" -r:"$M/Unity.ResourceManager.dll" \
   -r:"$GAME/Mods/0_TFP_Harmony/0Harmony.dll" \
   *.cs
 echo "Built ../GTS.dll"
