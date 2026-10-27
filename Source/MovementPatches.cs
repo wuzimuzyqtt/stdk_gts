@@ -13,7 +13,11 @@ namespace GTS
 	{
 		public static void Postfix(EntityPlayerLocal __instance, ref float __result)
 		{
-			if (GtsConfig.IsShrunk(__instance))
+			if (GtsPinFx.LocalPinned)
+			{
+				__result = 0f;
+			}
+			else if (GtsConfig.IsShrunk(__instance))
 			{
 				__result *= GtsConfig.GetSpeedMult(__instance);
 			}

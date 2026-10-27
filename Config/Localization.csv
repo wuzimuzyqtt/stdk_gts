@@ -1,3 +1,4 @@
 Key,File,Type,UsedInMainMenu,NoTranslate,KeepLoaded,english,schinese
 buffGtsShrinkName,buffs,Buff,false,false,,Shrunk,缩小
 buffGtsShrinkDesc,buffs,Buff,false,false,,"You are tiny. Anyone who walks over you will squash you flat. You stay tiny after respawning; type 'gts grow' in the console (F1) to return to normal size.","你变小了。任何人从你身上走过都会把你踩成一滩血。复活后仍保持缩小，在控制台(F1)输入 gts grow 恢复原状。"
+gtsPinnedTip,ui,Tooltip,false,false,,"Pinned under her foot! Mash JUMP to break free!","你被踩住了！狂按跳跃键挣脱！"

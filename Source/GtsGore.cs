@@ -14,6 +14,9 @@ namespace GTS
 		// Vanilla particle effect (ParticleEffects/p_<name>.prefab): the spurt a zombie makes biting into a corpse
 		private const string EatBlood = "blood_eat";
 
+		// The effect used for the per-landing squirts (gts squirttest <name> can try others)
+		public static string SquirtEffect = EatBlood;
+
 		// The ground blood models behind the vanilla bloodDecor blocks, spawned directly so they can go away
 		// with the flat corpse instead of being blocks in the world.
 		public static readonly string[] SplatVariants = { "01", "02", "05", "06" };
@@ -76,6 +79,35 @@ namespace GTS
 			}
 		}
 
+		// One foot landing on the victim: blood squirts out from under the edge of the sole all around, plus one
+		// spurt straight up. Not shrunk with the victim below GrindBloodMinScale, or it would vanish under the shoe.
+		public static void Squirt(Vector3 _pos, float _scale, bool _heavy)
+		{
+			float s = Mathf.Clamp(_scale, GtsConfig.GoreMinScale, 1f);
+			float ps = GtsConfig.GoreParticleScale * Mathf.Max(s, GtsConfig.GrindBloodMinScale) * GtsConfig.GoreEatBloodScale * GtsConfig.GrindBloodScale;
+			// from the real ground: a tiny victim's own position can be sunk into it
+			Vector3 center = GtsGround.Find(_pos, out _) + Vector3.up * 0.06f;
+			float edge = 0.12f + 0.1f * s;   // about where the sole ends
+			int n = _heavy ? GtsConfig.GrindBloodBursts + 3 : GtsConfig.GrindBloodBursts;
+			float a0 = Random.Range(0f, Mathf.PI * 2f);
+			for (int i = 0; i < n; i++)
+			{
+				float a = a0 + i * Mathf.PI * 2f / n + Random.Range(-0.3f, 0.3f);
+				Vector3 flat = new Vector3(Mathf.Cos(a), 0f, Mathf.Sin(a));
+				Vector3 outward = (flat + Vector3.up * Random.Range(0.25f, 0.6f)).normalized;
+				Burst(SquirtEffect, center + flat * edge, Quaternion.LookRotation(outward), ps);
+			}
+			Burst(SquirtEffect, center, Quaternion.LookRotation((Vector3.up + Random.insideUnitSphere * 0.3f).normalized), ps);
+		}
+
+		// The victim's own view: a spurt just in front of the camera, spraying back at it.
+		public static void ScreenSpurt(Transform _camera)
+		{
+			Vector3 pos = _camera.position + Origin.position + _camera.forward * 0.3f - _camera.up * 0.05f;
+			Vector3 dir = (-_camera.forward + Random.insideUnitSphere * 0.5f).normalized;
+			Burst(SquirtEffect, pos, Quaternion.LookRotation(dir), GtsConfig.GrindScreenBloodScale);
+		}
+
 		// The blood pool under the victim, flat on whatever ground is there. Lasts as long as the flat corpse.
 		public static void Splat(Vector3 _pos)
 		{
@@ -127,8 +159,15 @@ namespace GTS
 				WarnOnce(_name, "particle effect not found");
 				return;
 			}
-			Transform t = ParticleEffect.SpawnParticleEffect(new ParticleEffect(_name, _pos, _rot, 1f, Color.white), -1, true);
-			if (t == null || _scale == 1f)
+			// _pos is a world position: _isWorldPos makes the game subtract the floating origin (without it the
+			// effect lands off by Origin.position, i.e. nowhere near the victim once the origin has moved)
+			Transform t = ParticleEffect.SpawnParticleEffect(new ParticleEffect(_name, _pos, _rot, 1f, Color.white), -1, true, true);
+			if (t == null)
+			{
+				WarnOnce(_name + "#spawn", "particle effect did not spawn");
+				return;
+			}
+			if (_scale == 1f)
 			{
 				return;
 			}

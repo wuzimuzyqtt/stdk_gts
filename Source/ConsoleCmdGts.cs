@@ -30,8 +30,9 @@ namespace GTS
 				+ "  gts zombiestomp on|off - let female zombies squash you while shrunk (default off)\n"
 				+ "  gts status          - show current state\n"
 				+ "  gts gore            - preview the squash gore in front of you at your size (only you see it)\n"
+				+ "  gts squirttest [fx] - after 2s, the per-landing blood 1.5m in front of you and of your camera, 5 times (fx: particle name, e.g. blood_vehicle)\n"
 				+ "  gts bloodtest       - lay the 4 blood pool variants in a row in front of you (1-4, left to right)\n"
-				+ "  gts stomptest       - nearest zombie plays the stomp animation (only you see it)\n"
+				+ "  gts movetest <move> - nearest zombie plays a move on you, animation only: stomp, stompleft, pauseslam, kick, rub, toegrind, repeatstomp, standon\n"
 				+ "  gts animinfo        - log the nearest zombie's rig and animation clips (read only)\n"
 				+ "  gts ray             - debug: list what a gunshot from your view would hit";
 		}
@@ -130,6 +131,18 @@ namespace GTS
 					Out("gts: gore preview played");
 					break;
 				}
+				case "squirttest":
+				{
+					// the per-landing blood, 5 times starting 2 s from now (close the console): 1.5 m in front, seen
+					// from outside, and in front of the camera. An optional particle name replaces the effect.
+					if (_params.Count > 1)
+					{
+						GtsGore.SquirtEffect = _params[1];
+					}
+					GtsDriver.Instance.StartCoroutine(SquirtPreview(player));
+					Out("gts: close the console - squirting " + GtsGore.SquirtEffect + " 5 times in 2s");
+					break;
+				}
 				case "bloodtest":
 				{
 					Vector3 fwd = player.GetForwardVector();
@@ -144,16 +157,29 @@ namespace GTS
 					Out("gts: blood pools 1-4 (left to right) = " + string.Join(", ", GtsGore.SplatVariants) + ", gone in 2 minutes");
 					break;
 				}
-				case "stomptest":
+				case "movetest":
 				{
+					GtsMove move = GtsMove.Stomp;
+					if (_params.Count > 1 && !System.Enum.TryParse(_params[1], true, out move))
+					{
+						Out("gts: unknown move '" + _params[1] + "'. Moves: " + string.Join(", ", System.Enum.GetNames(typeof(GtsMove))));
+						return;
+					}
 					EntityZombie z = NearestZombie(world, player, 20f);
 					if (z == null)
 					{
 						Out("gts: no zombie within 20m");
 						return;
 					}
-					GtsStompAnim.Play(z);
-					Out("gts: " + z.GetDebugName() + " stomps");
+					if (SingletonMonoBehaviour<ConnectionManager>.Instance.IsServer)
+					{
+						GtsPins.Preview(z, player, move);   // she also steps to the right distance
+					}
+					else
+					{
+						GtsMoveAnim.Play(z, player, move);
+					}
+					Out("gts: " + z.GetDebugName() + " plays " + move + " (" + GtsMoves.Length(move).ToString("0.0") + "s, animation only)");
 					break;
 				}
 				case "animinfo":
@@ -185,6 +211,22 @@ namespace GTS
 				default:
 					Out(getHelp());
 					break;
+			}
+		}
+
+		private static System.Collections.IEnumerator SquirtPreview(EntityPlayerLocal _player)
+		{
+			yield return new WaitForSeconds(2f);
+			for (int i = 0; i < 5 && _player != null; i++)
+			{
+				Vector3 fwd = _player.GetForwardVector();
+				fwd.y = 0f;
+				float scale = GtsConfig.HasShrinkBuff(_player) ? GtsConfig.GetScale(_player) : 1f;
+				Vector3 spot = _player.position + fwd.normalized * 1.5f;
+				GtsGore.Squirt(spot, scale, true);
+				GtsGore.ScreenSpurt(_player.cameraTransform);
+				Log.Out("[GTS] squirttest " + GtsGore.SquirtEffect + " at " + GtsGround.Find(spot, out _).ToString("F2") + ", player at " + _player.position.ToString("F2"));
+				yield return new WaitForSeconds(1f);
 			}
 		}
 

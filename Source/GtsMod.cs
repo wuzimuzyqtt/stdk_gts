@@ -42,26 +42,49 @@ namespace GTS
 		public const float PlayerStompMaxScale = 0.3f; // other players only squash someone shrunk below this
 		public const float MaleTouchMargin = 0.2f;  // male zombie falls apart within its own radius + victim radius + this
 
-		// Female zombie stomp: she starts lifting her foot within StompTriggerRange; when it comes down
-		// (StompRaiseTime + StompHoldTime + StompSlamTime later) the server checks whether the victim is still
-		// under it. Players squash instantly, no animation.
+		// Female zombie encounters (see GtsPins / GtsMoves). Within StompTriggerRange she opens with a random move;
+		// a stomp landing on the victim pins them, a kick throws them. Pinned victims take damage on every landing.
 		public const float StompTriggerRange = 1.0f;   // horizontal metres, zombie to victim
+		public const float StompOnlyMaxScale = 0.3f;   // at or below this size female zombies only stomp, never swing or bite
 		public const float StompFootReach = 0.35f;     // foot lands this far in front of the zombie
 		public const float StompHitLeniency = 0.15f;   // extra radius around the landing spot
-		public const float StompCooldown = 1.5f;       // seconds before the same zombie stomps again
+		public const float StompCooldown = 1.5f;       // seconds before the same zombie starts again
+		public const int DamageLight = 5;              // per landing: rub, stand-on
+		public const int DamageNormal = 8;             // per landing: stomps, toe grind, repeat stomp
+		public const int DamageHeavy = 16;             // the hovering slam
+		public const int KickDamage = 12;
+		public const float KickRange = 0.9f;           // victim must be within this, in front of her
+		public const float KickForce = 0.15f;          // horizontal launch (character-controller units per frame)
+		public const float KickUp = 0.12f;             // vertical launch
+		public const float StandOnBack = 0.12f;        // during StandOn she stands this far behind the victim's centre
+		public const float StandOnStepSpeed = 1.2f;    // m/s while stepping over them
+		public const float KickStandDistance = 0.45f;  // during a kick she keeps the victim this far in front
+		public const float MoveStepSpeed = 1.5f;       // m/s she steps in to keep that distance (StompFootReach otherwise)
+		public const float StruggleNeeded = 12f;       // jump presses to break free...
+		public const float StruggleDecay = 2f;         // ...minus this many per second of not pressing
+		public const float BreakFreeCooldown = 3f;     // she can't start again for this long after an escape
+		public const float PinBreakDistance = 1.2f;    // pin ends if the victim somehow ends up this far away
+		public const string GrindSound = "gore_limb_3s";
+		public const float GrindShake = 12f;           // camera shake per landing for the victim
+		public const float GrindFlattenFirst = 0.25f;  // victim model squashed this much when pinned...
+		public const float GrindFlattenStep = 0.06f;   // ...and this much more per landing
+		public const float GrindMinFlatten = 0.3f;     // never flatter than this
+		public const float GrindBloodScale = 0.5f;      // blood squirted per landing, relative to the squash spurts
+		public const float GrindBloodMinScale = 0.4f;  // sized as if the victim were at least this big
+		public const int GrindBloodBursts = 5;         // spurts around the sole per landing (+3 for a pinning stomp / kick)
+		public static readonly bool GrindScreenBlood = true;   // the victim also gets a spurt right in front of their camera
+		public const float GrindScreenBloodScale = 0.8f;
+		public const float GrindTwistAngle = 30f;      // Rub: the foot pivots on its ball this far either way
+		public const float ToeGrindTwistAngle = 35f;   // ToeGrind: the same, up on the toes
 
-		// Procedural stomp animation (client side, see GtsStompAnim)
-		public const float StompRaiseTime = 0.35f;
-		public const float StompHoldTime = 0.1f;
-		public const float StompSlamTime = 0.1f;
-		public const float StompPlantTime = 0.12f;     // foot stays planted on the victim after impact
-		public const float StompAnimLength = 0.9f;     // including easing back into the normal animation
-		public const float StompHipAngle = 75f;        // thigh raised forward
-		public const float StompKneeAngle = 90f;       // knee bend at the top
-		public const float StompSlamHipAngle = 30f;    // thigh still forward when the foot lands, so it lands in front
-		public const float StompLeanBack = 8f;         // upper body leaning back while the knee is up
-		public const float StompLeanForward = 15f;     // and pressing forward into the stomp
-		public const float StompAxisSign = 1f;         // flip to -1 if the leg bends the wrong way
+		// Procedural leg animation (client side, see GtsMoveAnim)
+		public const float StompLeanBack = 8f;         // upper body leaning back while a knee is up
+		public const float StompLeanForward = 15f;     // and pressing forward into a stomp
+		public const float StompAxisSign = 1f;         // flip to -1 if the upper body bends the wrong way
+		public const float LegReach = 0.92f;           // a leg never straightens past this fraction of its length...
+		public const float MaxHipShift = 0.3f;         // ...the hips move toward the foot instead, up to this far
+		public const float FootSplay = 8f;             // toes turned out, degrees
+		public const float KneeOut = 0.15f;            // knees point slightly outward
 
 		// Per-player opt-in: 1 = zombies can squash me too. Set by "gts zombiestomp on", read by the server.
 		public const string ZombieStompCVar = "gtsZombieStomp";

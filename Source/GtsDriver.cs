@@ -30,16 +30,6 @@ namespace GTS
 		private readonly Dictionary<int, Vector3> lastPos = new Dictionary<int, Vector3>();
 		private readonly List<BloodBlock> bloodBlocks = new List<BloodBlock>();
 		private readonly List<EntityAlive> stompers = new List<EntityAlive>();
-
-		private class PendingStomp
-		{
-			public EntityZombie zombie;
-			public EntityPlayer victim;
-			public float impactAt;
-		}
-		private readonly Dictionary<int, PendingStomp> pendingStomps = new Dictionary<int, PendingStomp>();
-		private readonly Dictionary<int, float> stompCooldownUntil = new Dictionary<int, float>();
-		private readonly List<int> doneStomps = new List<int>();
 		private float lastCheck;
 
 		private void Awake()
@@ -55,17 +45,25 @@ namespace GTS
 		private void Update()
 		{
 			World world = GetWorld();
-			if (world == null || !SingletonMonoBehaviour<ConnectionManager>.Instance.IsServer)
+			if (world == null)
 			{
 				return;
 			}
+			if (!GameManager.IsDedicatedServer)
+			{
+				GtsPinFx.Update(world.GetPrimaryPlayer());
+			}
+			if (!SingletonMonoBehaviour<ConnectionManager>.Instance.IsServer)
+			{
+				return;
+			}
+			GtsPins.Update(world, Time.deltaTime);
 			float dt = Time.time - lastCheck;
 			if (dt >= GtsConfig.CheckInterval)
 			{
 				lastCheck = Time.time;
 				CheckStomps(world, dt);
 			}
-			ResolveStomps(world);
 			CleanupBlood(world);
 		}
 
@@ -79,6 +77,10 @@ namespace GTS
 				appliedScale.Clear();
 				Squashed.Clear();
 				GtsColliders.Reset();
+				GtsPins.Reset();
+				GtsPinFx.Reset();
+				GtsMoveAnim.Reset();
+				GtsDownPose.Reset();
 				return;
 			}
 			List<EntityPlayer> players = world.Players.list;
@@ -101,7 +103,8 @@ namespace GTS
 			}
 			if (!GameManager.IsDedicatedServer)
 			{
-				GtsStompAnim.LateUpdate();
+				GtsMoveAnim.LateUpdate();
+				GtsDownPose.LateUpdate(world);
 			}
 		}
 
@@ -122,17 +125,19 @@ namespace GTS
 				target = GtsConfig.GetScale(_player);
 			}
 
+			// pressed flatter under a grinding foot
+			float flatten = GtsPinFx.Flatten(id);
 			bool owned = appliedScale.ContainsKey(id);
-			if (target == 1f && !owned)
+			if (target == 1f && flatten == 1f && !owned)
 			{
 				return;
 			}
-			Vector3 cur = _player.ModelTransform.localScale;
-			if (Mathf.Abs(cur.x - target) > 0.0001f || Mathf.Abs(cur.y - target) > 0.0001f)
+			Vector3 want = new Vector3(target, target * flatten, target);
+			if ((_player.ModelTransform.localScale - want).sqrMagnitude > 0.00000001f)
 			{
-				_player.ModelTransform.localScale = Vector3.one * target;
+				_player.ModelTransform.localScale = want;
 			}
-			if (target == 1f)
+			if (target == 1f && flatten == 1f)
 			{
 				appliedScale.Remove(id);
 			}
@@ -209,7 +214,7 @@ namespace GTS
 						}
 						else if (femaleZombiesStomp && distSq <= GtsConfig.StompTriggerRange * GtsConfig.StompTriggerRange)
 						{
-							BeginStomp(zombie, victim);
+							GtsPins.TryEngage(zombie, victim);
 						}
 						continue;
 					}
@@ -234,83 +239,22 @@ namespace GTS
 			}
 		}
 
-		private void BeginStomp(EntityZombie _zombie, EntityPlayer _victim)
+		// Stop and face the target. Rotation is replicated to every client by the game.
+		public static void FaceTarget(EntityAlive _zombie, EntityAlive _target)
 		{
-			int id = _zombie.entityId;
-			if (pendingStomps.ContainsKey(id) || (stompCooldownUntil.TryGetValue(id, out float until) && Time.time < until))
+			if (_zombie == null || _zombie.IsDead() || _target == null)
 			{
 				return;
 			}
-			float impact = GtsConfig.StompRaiseTime + GtsConfig.StompHoldTime + GtsConfig.StompSlamTime;
-			PendingStomp ps = new PendingStomp { zombie = _zombie, victim = _victim, impactAt = Time.time + impact };
-			pendingStomps[id] = ps;
-			FaceVictim(ps);
-			stompCooldownUntil[id] = Time.time + impact + GtsConfig.StompCooldown;
-
-			SingletonMonoBehaviour<ConnectionManager>.Instance.SendPackage(NetPackageManager.GetPackage<NetPackageGtsStomp>().Setup(id));
-			if (!GameManager.IsDedicatedServer)
-			{
-				GtsStompAnim.Play(_zombie);
-			}
-		}
-
-		// The foot comes down: squash whoever tiny is still under it.
-		private void ResolveStomps(World _world)
-		{
-			if (pendingStomps.Count == 0)
-			{
-				return;
-			}
-			foreach (KeyValuePair<int, PendingStomp> kv in pendingStomps)
-			{
-				PendingStomp ps = kv.Value;
-				if (Time.time < ps.impactAt)
-				{
-					FaceVictim(ps);
-					continue;
-				}
-				doneStomps.Add(kv.Key);
-				EntityZombie z = ps.zombie;
-				EntityPlayer v = ps.victim;
-				if (z == null || z.IsDead() || v == null || !GtsConfig.IsShrunk(v) || !GtsConfig.ZombiesCanStomp(v))
-				{
-					continue;
-				}
-				Vector3 fwd = z.GetForwardVector();
-				fwd.y = 0f;
-				Vector3 foot = z.position + (fwd.sqrMagnitude > 0.001f ? fwd.normalized : Vector3.zero) * GtsConfig.StompFootReach;
-				float scale = GtsConfig.GetScale(v);
-				float hitRadius = GtsConfig.StompFootRadius + GtsConfig.PlayerRadius * scale + GtsConfig.StompHitLeniency;
-				Vector3 d = v.position - foot;
-				if (Mathf.Abs(d.y) <= GtsConfig.PlayerHeight * scale + GtsConfig.StompHeadroom && d.x * d.x + d.z * d.z <= hitRadius * hitRadius)
-				{
-					Squash(_world, v, z);
-				}
-			}
-			foreach (int id in doneStomps)
-			{
-				pendingStomps.Remove(id);
-			}
-			doneStomps.Clear();
-		}
-
-		// While winding up, the zombie stops and turns to the victim so the foot comes down on them.
-		// Rotation is replicated to every client by the game.
-		private static void FaceVictim(PendingStomp _ps)
-		{
-			if (_ps.zombie == null || _ps.zombie.IsDead() || _ps.victim == null)
-			{
-				return;
-			}
-			Vector3 d = _ps.victim.position - _ps.zombie.position;
+			Vector3 d = _target.position - _zombie.position;
 			if (d.x * d.x + d.z * d.z > 0.0001f)
 			{
 				float yaw = 90f - Mathf.Atan2(d.z, d.x) * Mathf.Rad2Deg;
-				_ps.zombie.SetRotationAndStopTurning(new Vector3(0f, yaw, 0f));
+				_zombie.SetRotationAndStopTurning(new Vector3(0f, yaw, 0f));
 			}
-			if (_ps.zombie.moveHelper != null)
+			if (_zombie.moveHelper != null)
 			{
-				_ps.zombie.moveHelper.Stop();
+				_zombie.moveHelper.Stop();
 			}
 		}
 
@@ -325,7 +269,7 @@ namespace GTS
 			return delta.magnitude / _dt;
 		}
 
-		private void Squash(World _world, EntityPlayer _victim, EntityAlive _stomper)
+		public void Squash(World _world, EntityPlayer _victim, EntityAlive _stomper)
 		{
 			Vector3 pos = _victim.position;
 			Log.Out("[GTS] {0} squashed {1}", _stomper.GetDebugName(), _victim.GetDebugName());
